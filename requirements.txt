@@ -1,0 +1,7 @@
+sqlalchemy
+bullmq
+psycopg2-binary
+fastapi
+pydantic
+uvicorn
+gunicorn
