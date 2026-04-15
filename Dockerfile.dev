@@ -8,5 +8,6 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-CMD ["gunicorn", "app.main:app", "--reload", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080"]
-
+# --timeout 300: allow up to 5 minutes per request
+# Hamburg alone sends >100 MB XML per delivery — the default 30s timeout is too short
+CMD ["gunicorn", "app.main:app", "--reload", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--timeout", "300"]
