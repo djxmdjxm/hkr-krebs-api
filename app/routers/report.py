@@ -100,16 +100,21 @@ async def get_report_summary(uid: str):
     import_created_at = row[0]
 
     with KrebsSession() as session:
-        # All patients inserted during or after this import run.
-        patient_ids_q = (
-            select(PatientReport.id, PatientReport.date_of_birth)
+        # One row per distinct patient_id — deduplicated basis for all patient stats.
+        # GROUP BY patient_id, take earliest date_of_birth per patient.
+        distinct_patients_q = (
+            select(
+                PatientReport.patient_id,
+                func.min(PatientReport.date_of_birth).label('date_of_birth'),
+            )
             .where(PatientReport.created_at >= import_created_at)
+            .group_by(PatientReport.patient_id)
             .subquery()
         )
 
-        # Patient count + age stats via PostgreSQL percentile aggregate.
+        # Patient count (distinct) + age stats via PostgreSQL percentile aggregate.
         age_expr = func.date_part(
-            'year', func.age(func.now(), patient_ids_q.c.date_of_birth)
+            'year', func.age(func.now(), distinct_patients_q.c.date_of_birth)
         )
         stats = session.execute(
             select(
@@ -117,13 +122,13 @@ async def get_report_summary(uid: str):
                 func.percentile_cont(0.5).within_group(age_expr).label('median_age'),
                 func.min(age_expr).label('min_age'),
                 func.max(age_expr).label('max_age'),
-            ).select_from(patient_ids_q)
+            ).select_from(distinct_patients_q)
         ).one()
 
-        # Tumor count + diagnosis year range for the same patient batch.
+        # Distinct tumor_id (Fall-ID) count + diagnosis year range for this batch.
         tumor_stats = session.execute(
             select(
-                func.count().label('tumor_count'),
+                func.count(func.distinct(TumorReport.tumor_id)).label('tumor_count'),
                 func.min(func.extract('year', TumorReport.diagnosis_date)).label('min_year'),
                 func.max(func.extract('year', TumorReport.diagnosis_date)).label('max_year'),
             ).join(PatientReport, TumorReport.patient_report_id == PatientReport.id)
