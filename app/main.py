@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import (
+    database,
     report,
     patient_report,
     tumor_report,
@@ -26,6 +27,7 @@ app = FastAPI(
 )
 
 ROUTERS = [
+    database,
     report,
     patient_report,
     tumor_report,
