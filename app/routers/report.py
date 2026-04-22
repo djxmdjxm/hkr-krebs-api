@@ -101,20 +101,27 @@ async def get_report_summary(uid: str):
 
     with KrebsSession() as session:
         # One row per distinct patient_id — deduplicated basis for all patient stats.
-        # GROUP BY patient_id, take earliest date_of_birth per patient.
+        # earliest diagnosis_date per patient is used as age reference (age at diagnosis,
+        # not current age — epidemiologically correct).
         distinct_patients_q = (
             select(
                 PatientReport.patient_id,
                 func.min(PatientReport.date_of_birth).label('date_of_birth'),
+                func.min(TumorReport.diagnosis_date).label('first_diagnosis_date'),
             )
+            .join(TumorReport, TumorReport.patient_report_id == PatientReport.id)
             .where(PatientReport.created_at >= import_created_at)
             .group_by(PatientReport.patient_id)
             .subquery()
         )
 
         # Patient count (distinct) + age stats via PostgreSQL percentile aggregate.
+        # Age calculated at first diagnosis date, not at current date.
         age_expr = func.date_part(
-            'year', func.age(func.now(), distinct_patients_q.c.date_of_birth)
+            'year', func.age(
+                distinct_patients_q.c.first_diagnosis_date,
+                distinct_patients_q.c.date_of_birth,
+            )
         )
         stats = session.execute(
             select(
