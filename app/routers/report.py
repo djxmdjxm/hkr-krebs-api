@@ -100,9 +100,15 @@ async def get_report_summary(uid: str):
     import_created_at = row[0]
 
     with KrebsSession() as session:
-        # One row per distinct patient_id — deduplicated basis for all patient stats.
-        # earliest diagnosis_date per patient is used as age reference (age at diagnosis,
-        # not current age — epidemiologically correct).
+        # Patient count — all patients in this batch, including those without tumors.
+        patient_count = session.execute(
+            select(func.count(func.distinct(PatientReport.patient_id)))
+            .where(PatientReport.created_at >= import_created_at)
+        ).scalar()
+
+        # One row per distinct patient_id with a tumor — used only for age statistics.
+        # Patients without tumors fall out here naturally: "age at diagnosis" is
+        # undefined without a diagnosis.
         distinct_patients_q = (
             select(
                 PatientReport.patient_id,
@@ -115,17 +121,16 @@ async def get_report_summary(uid: str):
             .subquery()
         )
 
-        # Patient count (distinct) + age stats via PostgreSQL percentile aggregate.
-        # Age calculated at first diagnosis date, not at current date.
+        # Age stats via PostgreSQL percentile aggregate.
+        # Age calculated at first diagnosis date per patient, not at current date.
         age_expr = func.date_part(
             'year', func.age(
                 distinct_patients_q.c.first_diagnosis_date,
                 distinct_patients_q.c.date_of_birth,
             )
         )
-        stats = session.execute(
+        age_stats = session.execute(
             select(
-                func.count().label('patient_count'),
                 func.percentile_cont(0.5).within_group(age_expr).label('median_age'),
                 func.min(age_expr).label('min_age'),
                 func.max(age_expr).label('max_age'),
@@ -146,10 +151,10 @@ async def get_report_summary(uid: str):
         return int(v) if v is not None else None
 
     return {
-        'patient_count':      _int(stats.patient_count),
-        'median_age':         _int(stats.median_age),
-        'min_age':            _int(stats.min_age),
-        'max_age':            _int(stats.max_age),
+        'patient_count':      patient_count,
+        'median_age':         _int(age_stats.median_age),
+        'min_age':            _int(age_stats.min_age),
+        'max_age':            _int(age_stats.max_age),
         'tumor_count':        _int(tumor_stats.tumor_count),
         'min_diagnosis_year': _int(tumor_stats.min_year),
         'max_diagnosis_year': _int(tumor_stats.max_year),
